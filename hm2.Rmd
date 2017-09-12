@@ -1,0 +1,335 @@
+---
+title: "BIOS 7400 Clinical Trials Assignment 2"
+author: "KuanJui Su" 
+institute: "Affiliation"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  word_document:
+     reference_docx: template.docx
+     df_print: kable
+---
+```{r}
+#install.packages("epitools")
+#install.packages("gvlma")
+library("gvlma")
+library("epitools")
+library("tidyr")
+```
+
+
+# Assignment I
+Write out the following formula for a control group labeled as Y. Discuss how randomization in treatment allocation can help cancel out the bias of the effect of regression to the mean.
+
+$$|E(X_2|x_1)-x_1|=|(\rho-1)(x_1-\mu)|$$
+By using the randomization in treament allocation to reduce the effects of regress to mean (RTM) at the design stage, we assume the subjects are randomli assgined to treatment or control groups the responses from two groups should be equally affected by RTM. Here, we can estimate the magnitude of the effect of RTM for treatment and control groups as below. 
+
+\[
+\begin{eqnarray}
+E(X_2|x_1)-x_1|=|(\rho-1)(x_1-\mu)|    - (1) Treatment~group\\
+E(Y_2|y_1)-y_1|=|(\rho-1)(y_1-\mu)|  - (2) Control~group\\
+\end{eqnarray}
+\]
+The formula (1) and formula (2) represent the estimation of the effect of RTM for treatment and control group, respectively. 
+The mean change in the control group includes both effects of RTM and the placebo, so the difference between the mean change of treatment group and the mean change of control group, such as (1)-(2), could cancel out the effect of the RTM. Hence, the estimate of the treatment effect could be more accuracy after adjusting for RTM.
+
+Reference: Adrian G Barnett, Jolieke C van der Pols, Annette J Dobson; Regression to the mean: what it is and how to deal with it, International Journal of Epidemiology, Volume 34, Issue 1, 1 February 2005, Pages 215–220, https://doi.org/10.1093/ije/dyh299
+
+# Assignment II
+Use the data (data_surrogate.txt) to perform surrogate validation analysis.
+
+*	Use outcome1 as surrogate outcome and outcome2 as the true clinical outcome
+*	Provide the calculation of PE, RE and  $\rho_z$.
+*	Based on the calculation results, can you support outcome1 as a good surrogate for outcome2?
+
+In order to check Prentice's criteria, the linear models was conducted as below.
+
+\[
+\begin{eqnarray}
+Outcome2=\mu+\gamma~Outcome1_j+\varepsilon_j\\
+Outcome2=\tilde{\mu}_T+\beta_S Z_j+\gamma_Z~Outcome1_j+\tilde{\varepsilon}_{T_j}\\
+\end{eqnarray}
+\]
+where Z: treatment group. Assume "-1": Case group and "1": Control group. We also assume j indexes subjects and $\epsilon_j$ and $\tilde{\epsilon}_{T_j}$ are normal with mean 0.
+
+```{r Load surrogate data, echo=FALSE}
+DT2<-read.table(file = "data_surrogate.txt",header = TRUE)
+#DT2$Treatment<-ifelse(DT2$Treatment==-1,0,1)
+DT2<-transform(DT2, Treatment = as.factor(Treatment))
+```
+```{r plot, echo=FALSE,eval=FALSE,fig.height=2}
+par(mfrow=c(1,3))
+hist(DT2$Outcome1,xlab = "Outcome1",main = "Surrogate Outcome")
+hist(DT2$Outcome2, xlab = "Outcome2",main = "Clinical Outcome")
+barplot(table(DT2$Treatment),xlab = "Treatment groups",ylim = c(0,100),main = "Treatment")
+```
+
+```{r,echo=TRUE}
+Prentice1<-lm(formula = Outcome2~Outcome1,data = DT2)
+Prentice2<-lm(formula = Outcome2~Outcome1+Treatment,data = DT2)
+```
+For the criterion one: 
+\[
+\begin{eqnarray}
+H_0: \gamma =0 \\
+H_a: \gamma \neq 0 \\
+\end{eqnarray}
+\]
+```{r}
+summary(Prentice1)
+```
+Based on the result from linear model test, we found the hypothesis is rejected with the p value less than 2e-16.
+
+For second criterion:
+```{r}
+summary(Prentice2)
+```
+\[
+\begin{eqnarray}
+H_0: \beta_S =0 \\
+H_a: \beta_S \neq 0 \\
+\end{eqnarray}
+\]
+From the result of the liner model test, we found the coefficent of the treatment is not significant with p value 0.421. Hence, we accept the null hypothesis that means our candidate still as a valid surrogate.
+
+```{r, fig.width=4,fig.height=4,eval=FALSE,echo=FALSE}
+par(mfrow=c(2,2))
+plot(Prentice1)
+plot(Prentice2)
+```
+
+```{r Test assumption,echo=FALSE}
+gvmodel<-gvlma(Prentice1)
+```
+## Proportion explained by surrogate outcome(PE)
+Assume the assumptions are accetptable. The caculation of PE, RE, and $\rho_z$ as below.
+\[
+\begin{eqnarray}
+Outcome2=\tilde{\mu}_T+\beta_S Z_j+\gamma_Z~Outcome1_j+\tilde{\varepsilon}_{T_j}\\
+Outcome2=\mu_T+\beta_S Z_j+\varepsilon_{T_j}\\
+\end{eqnarray}
+\]
+```{r PE}
+P1_1<-lm(formula = Outcome2~Treatment+Outcome1,data = DT2)
+P1_2<-lm(formula = Outcome2~Treatment,data = DT2)
+```
+The $\beta$ and $\beta_S were generated from the linear model, and the values were applied to the formula below.
+
+PE= $\frac{\beta- \beta_S}{\beta}$ = $\frac{`r round(P1_2$coefficients[[2]],4)`-(`r round(P1_1$coefficients[[2]],4)`)}{`r round(P1_2$coefficients[[2]],4)`}$ = `r round((P1_2$coefficients[[2]]-P1_1$coefficients[[2]])/P1_2$coefficients[[2]],4)`
+
+In the code below, we used bootstaping method to estimate the 95% biitstraped confidence interval of PE which is based on 10,000 repliations.
+```{r confidence interval,eval=FALSE}
+library(boot)
+set.seed(30949)
+BootPE<-function(formulaA,formulaB,data,indices) {
+  d<-data[indices,]
+  P1<-lm(formulaA ,data = d)
+  P2<-lm(formulaB ,data = d)
+  PE<-(P2$coefficients[[2]]-P1$coefficients[[2]])/P2$coefficients[[2]]
+  return(PE)
+}
+PEresults<-boot(data = DT2,statistic = BootPE,R = 10000,formulaA= Outcome2~Treatment+Outcome1,formulaB= Outcome2~Treatment)
+(boot.ci(PEresults,type = "basic"))
+```
+
+
+## Relative effect(RE)
+\[
+\begin{eqnarray}
+Outcome2={\mu}_T+\beta Z_j+{\varepsilon}_{T_j}\\
+Outcome1=\mu_S+\alpha Z_j+\varepsilon_{S_j}\\
+\end{eqnarray}
+\]
+```{r RE}
+P2_1<-lm(formula = Outcome2~Treatment,data = DT2)
+P2_2<-lm(formula = Outcome1~Treatment,data = DT2)
+```
+RE= $\frac{\beta}{\alpha}$ = $\frac{`r round(P2_1$coefficients[[2]],4)`}{`r round(P2_2$coefficients[[2]],4)`}$ = `r round((P2_1$coefficients[[2]]/P2_2$coefficients[[2]]),4)`
+
+## Adjusted association $\rho_z$
+```{r,echo=FALSE}
+library(knitr)
+```
+```{r}
+varMatrix<-as.data.frame(var(x = DT2[,c(3,4)]))
+kable(varMatrix)
+```
+
+The adjusted $\rho_Z$ = $\frac{\sigma_{ST}}{\sqrt{\sigma_{SS} \sigma_{TT}}}$ = $\frac{`r round(varMatrix[1,2],2)`}{\sqrt{ `r round(varMatrix[1,1],2)`*`r round(varMatrix[2,2],2)`}}$=`r round(varMatrix[1,2]/sqrt(varMatrix[1,1]*varMatrix[2,2]),4)`
+
+The adjusted correlation between the clinical outcome and the surrogate outcome is `r round(varMatrix[1,2]/sqrt(varMatrix[1,1]*varMatrix[2,2]),4)`.
+
+# Summary
+From the statistical surrogate validation process, our candidate passed the two criteria directly, which reject the null hypothesis $ \gamma = 0 $ and also retain the null hypothesis $ \beta_S =0 $ for the linear models respectively. We can assume the candidate is possible to be the good surrogate as the true clinical outcome. 
+
+Although the lower bound of 95% bootstrapped confidence of PE (-2.09) on 10,000 replication is not larger than 0.5, there are still some reasons that show the outcome one as a good surrogate for the outcome two. First, the observed proportion explained by the surrogate outcome is 0.5631 which is larger than 0.5. Second, the adjusted correlation between the clinical outcome and the surrogate outcome is 0.74, which shown higher correlated with the clinical outcome. Last, the relative effect of the treatment on outcome two versus outcome one usually be expected as a value of 1 that represent the treatment effect on both measurements are similar. However, our relative effect is 1.6375, which shows the treatment effect on both outcomes is not perfectly matched but acceptable. 
+
+# Assignment III
+Use the DBP dataset.
+
+* Please use t test and Wilcoxon rank‐sum test to test the difference of the treatment on blood pressure change (the difference between the blood pressure measured on time 4, DBP4, and measured on time 1, DBP1).
+* Present the results and write the report on your findings.
+
+```{r,echo=FALSE,message=FALSE}
+DT3<-read.table(file ="dbp.txt",header = TRUE)
+DT3$diff=DT3$DBP4-DT3$DBP1
+```
+## t test
+Befroe doing t test, we used the F test to compare two varices, and the result of the F test will be used in the following t test.
+```{r compare two variaces}
+(FvarTest<-var.test(diff~TRT,data = DT3))
+```
+From the result above, we found the p-value of F test is `r round(FvarTest$p.value,4)` which implies that the variances between two groups are the same. Hence, two sample t test with equal variances will be used in this analysis.
+
+```{r t.test}
+(TtestResult<-t.test(diff~TRT,data = DT3,var.equal=TRUE))
+```
+The two sample t-test showed that the difference of effect between baseline and time 4 is significant with p-value  less than 0.0001.  The 95% confidence interval of the difference between Group A and Group B is between `r round(TtestResult$conf.int[c(1,2)],4)`.
+
+## Wilcoxon rank-sum test
+```{r,warning=FALSE}
+(Wil_result<-wilcox.test(diff~TRT,data = DT3, conf.int = TRUE))
+```
+
+A Wilcoxon rank-sum test can be used to determine whether two dependent samples were followed from populations having the same distribution. From the result above, we found it is significant to reject the null hypothesis with a statistic W `r Wil_result$statistic[[1]]` and p-value `r format(Wil_result$p.value,digits = 3)`. We can conclude the distribution of the difference of effect between two different groups is significantly different.
+
+## Summary
+In this analysis, we can easily find the averages of the blood pressure that measured at the baseline and time 4, and the blood pressure changes between the two-time points are not the same between the treatment group and the control group. Within the treatment group (A), we could found the average blood pressure at the time 4 is 106.25 which is reduced from 116.55 at the baseline. The mean of blood pressure change between these two time-points is -10.3 (SD=3.69) for group A and -4.3 (SD=2.39) for group B, respectively.
+```{r,echo=FALSE,message=FALSE}
+library(dplyr)
+(DescriptiveStatistics<-DT3%>%group_by(TRT)%>%summarise("Ave_DBP1"=mean(DBP1),"Ave_DBP4"=mean(DBP4),"Ave_Diff"=mean(diff),"SD_diff"=format(sd(diff),digits = 3)))
+```
+
+From the boxplot, we found it seems to have a significant change between baseline and time 4.
+```{r,fig.align="center",fig.width=4,fig.height=4}
+boxplot(diff~TRT,data = DT3,ylab="DBP Changes", las=1,main="Diff of DBP1 and DBP4\nbetween TRT and Control groups")
+```
+
+By using the formal statistical test to identify the significant difference of the treatment on blood pressure change from the baseline to time 4, we can found both of the parametric (t test), and non-parametric (Wilcoxon) methods are significant to reject the null hypothesis with the p-value less than 0.0001. The 95% confidence interval from both statistical methods also indicated a consistency range as the table below. Hence, we can conclude the there is significantly different from the treatment on blood pressure change from the baseline (time 1) to time 4.
+
+Test | Statistic | p-value | 95% confidence interval (Lower,Upper)
+:-----|:-----------:|:---------:|:-------------------------:
+T test|`r format(TtestResult$statistic[[1]],digits = 4)`| `r format(TtestResult$p.value[[1]],digits = 4)`| `r format(TtestResult$conf.int,digits = 4)`
+Wilcoxon test|`r Wil_result$statistic[[1]]` | `r format(Wil_result$p.value,digits =  4)`|`r format(Wil_result$conf.int[1:2],digits = 4)`
+
+
+
+# Assignment IV
+Use the CRASH trial (Corticosteroid Randomization After Significant Head Injury) data to compare the odds for “death” over “survival” between corticosteroid and placebo treatments.
+
+* Use the prop.test in R to perform the statistical analysis
+*	The comparison should be made for “best prognosis”, “intermediate prognosis” and “worst prognosis” groups as well as all the subjects pooled together.
+*	Calculate the risk difference, risk ratio and odds ratio for the comparisons
+*	Present the results and write a report on your findings.
+
+```{r generate data 4,echo=FALSE}
+DT4<-data.frame("Prognosis"=rep(c("Best","Intermediate","Worst"),c(3187,3182,3185)),
+                "Trt"=rep(rep(c("Corticosteroid","Placebo"),3),c(1589,1598,1610,1572,1601,1584)),
+                "Status"=rep(rep(c("Dead","Survival"),6),c(67,1522,59,1539,282,1328,225	,1347,899 ,702,791,793)))
+
+
+```
+
+
+# Compare the proportion of dead between Corticosteroid and Placebo groups for the whole subjects together
+\[
+\begin{eqnarray}
+H_0:P_{C}=P_P \\
+H_a:P_{C}\neq P_P \\
+\end{eqnarray}
+\]
+where C: Corticosteroid group and P: Placebo group
+
+```{r}
+AllTable<-table(DT4$Trt,DT4$Status)
+(AllResult<-prop.test(AllTable))
+kable(AllTable)
+```
+
+To test the equality of proportion in the two groups of the whole subjects, we found the result of the proportion test shown the there is significant difference proportion of dead between Corticosteroid group and Placebo group with p value `r round(AllResult$p.value,5 )`. Next, we stratified the subjects into three groups and compared their proportions separately.
+
+```{r Proportion test each cate}
+prop.test.revised<-function(data=DT4,cat){
+  BestPro<-data%>%filter(Prognosis==cat)
+  proportion_test<-prop.test(table(BestPro$Trt,BestPro$Status))
+  result_table<-data.frame("Prognosis"=cat,"X-square"=proportion_test$statistic,
+                           "p-value"=proportion_test$p.value,
+                           "P_Corticosteroid"=proportion_test$estimate[[1]],
+                           "P_Placebo"=proportion_test$estimate[[2]])
+  return(result_table)}
+Result_prop_test<-rbind(prop.test.revised(cat = "Best"),prop.test.revised(cat = "Intermediate"),prop.test.revised(cat = "Worst"))
+row.names(Result_prop_test)<-c("Best","Intermediate","Worst")
+kable(format(Result_prop_test[,-1],digits=3))
+```
+
+We found the proportion of dead between two groups for the best prognosis is not statistically different. Regarding the intermediate group and worst group,  we reject the null hypothesis and accept the alternative hypothesis with p value `r Result_prop_test$p.value[2]` and `r Result_prop_test$p.value[3]`, respectively.
+
+## Risk Difference, Risk Ratio, and Odds Ratio
+```{r}
+epiValue<-function(dt=DT4,cat=NA){
+  if (is.na(cat)){
+    Risk_result<-epitab(x = dt$Trt,y = dt$Status,rev="both", method = c("riskratio"))$tab
+    Odds_result<-epitab(x = dt$Trt,y = dt$Status,rev="both", method = c("oddsratio"))$tab
+    whole_result<-cbind(Risk_result,Odds_result[,c(5:8)])
+    return(data.frame(whole_result))
+  } else {
+    dt<-dt%>%filter(Prognosis==cat)
+    Risk_result<-epitab(x = dt$Trt,y = dt$Status,rev="both", method = c("riskratio"))$tab
+    Odds_result<-epitab(x = dt$Trt,y = dt$Status,rev="both", method = c("oddsratio"))$tab
+    whole_result<-cbind(Risk_result,Odds_result[,c(5:8)])
+    return(data.frame(whole_result))
+  }
+}
+Overall_result<-epiValue()
+Best_result<-epiValue(cat="Best")
+Inter_result<-epiValue(cat="Intermediate")
+Worst_result<-epiValue(cat="Worst")
+```
+
+Here list the estimates we used in previous analysis.
+
+- Risk = proportion in group with condition present[Dead]
+    - For overall:  $\hat{P}_c$ = `r AllResult$estimate[[1]]` and $\hat{P}_p$ = `r round(AllResult$estimate[[2]],2)`.
+    - For best prognosis: $\hat{P}_{cBest}$ = `r round(Best_result$p1[2],2)` and $\hat{P}_{pBest}$ = `r round(Best_result$p1[1],2)`.
+    - For intermediate prognosis: $\hat{P}_{cIntM}$ = `r round(Inter_result$p1[2],2)` and $\hat{P}_{pIntM}$ = `r round(Inter_result$p1[1],2)`.
+    - For worst prognosis: $\hat{P}_{cWorst}$ = `r round(Worst_result$p1[2],2)` and $\hat{P}_{pWorst}$ = `r round(Worst_result$p1[1],2)`.
+
+- Risk Difference = Risk[Corticosteroid]-Risk[Placebo]
+    - For overall:  $\hat{P}_c - \hat{P}_p$ = `r AllResult$estimate[[1]] - round(AllResult$estimate[[2]],2)`.
+    - For best prognosis: $\hat{P}_{cBest} - \hat{P}_{pBest}$ = `r round(Best_result$p1[2],2) - round(Best_result$p1[1],2)`.
+    - For intermediate prognosis: $\hat{P}_{cIntM} - \hat{P}_{pIntM}$ = `r round(Inter_result$p1[2],2) - round(Inter_result$p1[1],2)`.
+    - For worst prognosis: $\hat{P}_{cWorst}- \hat{P}_{pWorst}$ = `r round(Worst_result$p1[2],2)-round(Worst_result$p1[1],2)`.
+- Risk Ratio = Risk[Corticosteroid]/Risk[Placebo]
+    - For overall:  $\frac{\hat{P}_c}{1-\hat{P}_c}$ = `r round(Overall_result$riskratio[[2]],2)`.
+    - For best prognosis: $\frac{\hat{P}_{cBest}}{1-\hat{P}_{cBest}}$ = `r round(Best_result$p1[2]/Best_result$p1[1],2)`.
+    - For intermediate prognosis: $\frac{\hat{P}_{cIntM}}{1-\hat{P}_{cIntM}}$ = `r round(Inter_result$p1[2]/Inter_result$p1[1],2)`.
+    - For worst prognosis: $\frac{\hat{P}_{cWorst}}{(1-\hat{P}_{cWorst}}$ = `r round(Worst_result$p1[2]/Worst_result$p1[1],2)`.
+    
+- Odds[Placebo] = Dead[group1]/Survival[group1]
+    - For overall:  $\frac{\hat{P}_p}{1-\hat{P}_p}$ = `r round(Overall_result$p1[[1]]/(1-Overall_result$p1[[1]]),2)`.
+    - For best prognosis: $\frac{\hat{P}_{pBest}}{1-\hat{P}_{pBest}}$ = `r round(Best_result$p1[[1]]/(1-Best_result$p1[[1]]),2)`.
+    - For intermediate prognosis: $\frac{\hat{P}_{pIntM}}{1-\hat{P}_{pIntM}}$ = `r round(Inter_result$p1[[1]]/(1-Inter_result$p1[[1]]),2)`.
+    - For worst prognosis: $\frac{\hat{P}_{pWorst}}{1-\hat{P}_{pWorst}}$ = `r round(Worst_result$p1[1]/(1-Worst_result$p1[1]),2)`.
+- Odds[Corticosteroid] = Dead[group2]/Survival[group2]
+    - For overall:  $\frac{\hat{P}_p}{1-\hat{P}_p}$ = `r round(Overall_result$p1[[2]]/(1-Overall_result$p1[[2]]),2)`.
+    - For best prognosis: $\frac{\hat{P}_{pBest}}{1-\hat{P}_{pBest}}$ = `r round(Best_result$p1[[2]]/(1-Best_result$p1[[2]]),2)`.
+    - For intermediate prognosis: $\frac{\hat{P}_{pIntM}}{1-\hat{P}_{pIntM}}$ = `r round(Inter_result$p1[[2]]/(1-Inter_result$p1[[2]]),2)`.
+    - For worst prognosis: $\frac{\hat{P}_{pWorst}}{1-\hat{P}_{pWorst}}$ = `r round(Worst_result$p1[2]/(1-Worst_result$p1[2]),2)`.
+- Odds Ratio = Odds[Corticosteroid]/Odds[Placebo]
+    - For overall:  $\hat{\psi}$ = `r round(Overall_result$oddsratio[[2]],2)`.
+    - For best prognosis: $\hat{\psi}_{cBest}$ = `r round(Best_result$oddsratio[[2]],2)`.
+    - For intermediate prognosis: $\hat{\psi}_{cIntM}$ = `r round(Inter_result$oddsratio[[2]],2)`.
+    - For worst prognosis: $\hat{\psi}_{cWorst}$ = `r round(Worst_result$oddsratio[[2]],2)`.
+    
+## Summary
+For the proportion test, we compared the percentage of dead between corticosteroid group and placebo group, and we found it is significantly different with the p value less than 0.05. After comparing the different stratifications, "Best prognosis," Intermediate prognosis," and "Worst prognosis," we only accept the null hypothesis of equal proportion for two groups within the Best prognosis subjects (p value<0.001). Both results of "Intermediate prognosis" and "Worst prognosis" are shown the significant differences in the percentage of dead between corticosteroid and placebo groups. If we only consider the proportion of dead for pooled subjects, we found the proportion of dead is 26% in the Corticosteroid group and 22% in the placebo group. After stratifying the subject base on their prognosis situation, we found the highest proportion of dead is 56% that belongs to the subjects who are "Worst prognosis" and received corticosteroid treatment. The minimum percentage of dead is 3% that is the subject who is with "Best prognosis" and received the only placebo.
+```{r}
+TotalTable<-data.frame(rbind(Overall_result,Best_result,Inter_result,Worst_result))
+TotalTable$category<-rep(c("Overall","Best","Intermediate","Worst"),c(2,2,2,2))
+format(TotalTable,digits=4)
+```
+
+Comparing the odds ratio and risk ratio between corticosteroid and placebo groups, we also found the results are also compatible with previous proportion test, which also reported the subjects receiving corticosteroid in the worst prognosis had 1.124 times the risk of death compared to subjects who received the only placebo. Also, for the subject receiving corticosteroid treatment, the odds of being dead are 1.284 times larger than the odds for a subject receiving the only placebo under the worst prognosis. For the subjects receiving corticosteroid under intermediate prognosis had 1.224 times the risk of death compares to the placebo group, and the odds ratio is 1.271 which is also similar to the worst prognosis.
+
+
+
+
